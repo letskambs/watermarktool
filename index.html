@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Watermark</title>
+    
+</head>
+<body>
+    <h1>Image Watermarking Tool</h1>
+    <p>Check the console for progress updates.</p>
+    <script>
+// HTML structure to select files and display watermarked images
+const appHTML = `
+  <div style="max-width: 800px; margin: 0 auto; font-family: Arial, sans-serif;">
+    <header style="text-align: center; padding: 20px 0;">
+      <h1 style="font-size: 24px; color: #333;">Bulk Image Watermark Tool</h1>
+      <p style="color: #666;">Upload images, apply a watermark, and download them all at once!</p>
+    </header>
+
+    <main style="padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 8px;">
+      <div style="margin-bottom: 20px;">
+        <label for="imageInput" style="font-size: 16px; color: #333;">Select Images:</label>
+        <input type="file" id="imageInput" multiple accept="image/*" style="display: block; margin-top: 10px;">
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <button id="changeWatermarkButton" style="padding: 10px 20px; background-color: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer;">Change Watermark</button>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <label for="watermarkSize" style="font-size: 16px; color: #333;">Watermark Size (%):</label>
+        <input type="range" id="watermarkSize" min="10" max="100" value="20" style="margin-left: 10px;">
+        <span id="watermarkSizeValue" style="font-size: 16px; color: #333;">20%</span>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <label for="watermarkOpacity" style="font-size: 16px; color: #333;">Watermark Opacity:</label>
+        <input type="range" id="watermarkOpacity" min="0.1" max="1" step="0.1" value="1" style="margin-left: 10px;">
+        <span id="watermarkOpacityValue" style="font-size: 16px; color: #333;">100%</span>
+      </div>
+
+      <button id="downloadAllButton" style="display: none; padding: 10px 20px; background-color: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer;">Download All</button>
+    </main>
+
+    <section id="outputContainer" style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;"></section>
+
+    <canvas id="watermarkCanvas" style="display:none;"></canvas>
+  </div>
+`;
+
+document.body.innerHTML = appHTML;
+
+// JavaScript to handle image processing
+const imageInput = document.getElementById("imageInput");
+const changeWatermarkButton = document.getElementById("changeWatermarkButton");
+const watermarkSizeInput = document.getElementById("watermarkSize");
+const watermarkSizeValue = document.getElementById("watermarkSizeValue");
+const watermarkOpacityInput = document.getElementById("watermarkOpacity");
+const watermarkOpacityValue = document.getElementById("watermarkOpacityValue");
+const downloadAllButton = document.getElementById("downloadAllButton");
+const outputContainer = document.getElementById("outputContainer");
+const watermarkCanvas = document.getElementById("watermarkCanvas");
+let watermarkImage = null;
+let watermarkedImages = [];
+let watermarkSize = 20; // Default watermark size as percentage
+let watermarkOpacity = 1; // Default opacity
+let originalImages = []; // Store original images for reprocessing
+
+// Add favicon link to prevent 404 errors
+const faviconLink = document.createElement("link");
+faviconLink.rel = "icon";
+faviconLink.href = "data:,"; // Blank favicon to suppress errors
+
+document.head.appendChild(faviconLink);
+
+// Load the watermark image from a predefined folder
+(async () => {
+  const watermarkPath = "watermarkimage/watermark.png"; // Adjust this path to your folder structure
+  watermarkImage = await loadWatermarkImage(watermarkPath);
+})();
+
+imageInput.addEventListener("change", async (event) => {
+  if (!watermarkImage) {
+    alert("Failed to load the watermark image. Make sure it exists in the specified folder.");
+    return;
+  }
+
+  outputContainer.innerHTML = ""; // Clear previous output
+  watermarkedImages = []; // Reset the watermarked images array
+  originalImages = []; // Reset original images array
+
+  const files = Array.from(event.target.files);
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+
+    const image = await loadImage(file);
+    originalImages.push(image);
+    const watermarkedImage = applyWatermark(image);
+    watermarkedImages.push({ name: file.name, url: watermarkedImage });
+
+    const imgElement = document.createElement("img");
+    imgElement.src = watermarkedImage;
+    imgElement.style.border = "1px solid #ddd";
+    imgElement.style.borderRadius = "8px";
+    imgElement.style.maxWidth = "200px";
+    imgElement.style.boxShadow = "0 2px 4px rgba(0, 0, 0, 0.1)";
+
+    outputContainer.appendChild(imgElement);
+  }
+
+  if (watermarkedImages.length > 0) {
+    downloadAllButton.style.display = "block";
+    watermarkOpacityInput.disabled = false; // Explicitly ensure the opacity slider is enabled
+  }
+});
+
+// Change the watermark image
+changeWatermarkButton.addEventListener("click", () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.onchange = async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      watermarkImage = await loadImage(file);
+      alert("Watermark image updated successfully!");
+      reapplyWatermarks();
+    }
+  };
+  input.click();
+});
+
+// Update watermark size and display percentage
+watermarkSizeInput.addEventListener("input", (event) => {
+  watermarkSize = parseInt(event.target.value, 10);
+  watermarkSizeValue.textContent = `${watermarkSize}%`;
+  reapplyWatermarks();
+});
+
+// Update watermark opacity and display percentage
+watermarkOpacityInput.addEventListener("input", (event) => {
+  watermarkOpacity = parseFloat(event.target.value);
+  watermarkOpacityValue.textContent = `${Math.round(watermarkOpacity * 100)}%`;
+  reapplyWatermarks();
+});
+
+// Reapply watermarks with updated settings
+function reapplyWatermarks() {
+  outputContainer.innerHTML = "";
+  watermarkedImages = [];
+
+  originalImages.forEach((image, index) => {
+    const watermarkedImage = applyWatermark(image);
+    watermarkedImages.push({ name: `image-${index + 1}.png`, url: watermarkedImage });
+
+    const imgElement = document.createElement("img");
+    imgElement.src = watermarkedImage;
+    imgElement.style.border = "1px solid #ddd";
+    imgElement.style.borderRadius = "8px";
+    imgElement.style.maxWidth = "200px";
+    imgElement.style.boxShadow = "0 2px 4px rgba(0, 0, 0, 0.1)";
+
+    outputContainer.appendChild(imgElement);
+  });
+}
+
+// Include JSZip library dynamically
+const jsZipScript = document.createElement("script");
+jsZipScript.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+jsZipScript.onload = () => {
+  // Handle the download all button
+  downloadAllButton.addEventListener("click", () => {
+    const zip = new JSZip();
+    const imgFolder = zip.folder("watermarked-images");
+
+    watermarkedImages.forEach(({ name, url }) => {
+      const base64Data = url.split(",")[1];
+      imgFolder.file(`watermarked-${name}`, base64Data, { base64: true });
+    });
+
+    zip.generateAsync({ type: "blob" }).then((content) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(content);
+      a.download = "watermarked-images.zip";
+      a.click();
+    });
+  });
+};
+document.head.appendChild(jsZipScript);
+
+function loadImage(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadWatermarkImage(path) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous"; // Allow cross-origin loading
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load watermark image."));
+    img.src = path;
+  });
+}
+
+function applyWatermark(image) {
+  const canvas = watermarkCanvas;
+  const ctx = canvas.getContext("2d");
+
+  // Set canvas size to match image
+  canvas.width = image.width;
+  canvas.height = image.height;
+
+  // Draw the image
+  ctx.drawImage(image, 0, 0);
+
+  // Set opacity for the watermark
+  ctx.globalAlpha = watermarkOpacity;
+
+  // Draw the watermark image
+  const watermarkWidth = (image.width * watermarkSize) / 100; // Adjust watermark size
+  const watermarkHeight = (watermarkImage.height / watermarkImage.width) * watermarkWidth;
+  const x = image.width - watermarkWidth - 10; // Bottom-right corner
+  const y = image.height - watermarkHeight - 10;
+
+  ctx.drawImage(watermarkImage, x, y, watermarkWidth, watermarkHeight);
+
+  // Reset globalAlpha to default for other operations
+  ctx.globalAlpha = 1;
+
+  return canvas.toDataURL("image/png");
+}
+
+    </script>
+</body>
+</html>
